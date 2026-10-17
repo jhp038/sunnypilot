@@ -260,4 +260,12 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       AlertStatus.normal, AlertSize.small,
       Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 2.),
   },
+
+  EventNameSP.blindSpotWarning: {
+    # PERMANENT is eligible while disengaged; this event is emitted only once.
+    ET.PERMANENT: Alert(
+      "", "",
+      AlertStatus.normal, AlertSize.none,
+      Priority.LOWEST, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 0.3),
+  },
 }

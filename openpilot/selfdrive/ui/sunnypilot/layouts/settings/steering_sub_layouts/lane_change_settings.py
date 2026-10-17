@@ -56,6 +56,16 @@ class LaneChangeSettingsLayout(Widget):
       title=lambda: tr("Block Lane Change: Road Edge Detection"),
       description=lambda: tr("Blocks the lane change if the model sees a road edge on your signaled side."),
     )
+    self._independent_bsm_available = b"IndependentBsmAlert" in ui_state.params.all_keys()
+    self._independent_bsm_alert = toggle_item_sp(
+      param="IndependentBsmAlert" if self._independent_bsm_available else None,
+      enabled=self._independent_bsm_available,
+      title=lambda: tr("Independent Blind Spot Sound"),
+      description=lambda: tr("Sounds once when a single turn signal and a blind spot detection are on the same side. " +
+                             "Works onroad with steering assistance disengaged and Auto Lane Change off. Quiet Mode can mute this sound. " +
+                             "Toyota 0x3F6 BSM data may differ from the factory mirror indication. " +
+                             "This feature is not a replacement for the factory BSM system."),
+    )
 
     items = [
       self._lane_change_timer,
@@ -63,6 +73,8 @@ class LaneChangeSettingsLayout(Widget):
       self._bsm_delay,
       LineSeparatorSP(40),
       self._road_edge_block,
+      LineSeparatorSP(40),
+      self._independent_bsm_alert,
     ]
 
     return items
@@ -83,6 +95,7 @@ class LaneChangeSettingsLayout(Widget):
 
   def _update_toggles(self):
     enable_bsm = ui_state.CP is not None and ui_state.CP.enableBsm
+    self._independent_bsm_alert.action_item.set_enabled(enable_bsm and self._independent_bsm_available)
     if not enable_bsm and ui_state.params.get_bool("AutoLaneChangeBsmDelay"):
       ui_state.params.remove("AutoLaneChangeBsmDelay")
     self._bsm_delay.action_item.set_enabled(enable_bsm and ui_state.params.get("AutoLaneChangeTimer", return_default=True) > AutoLaneChangeMode.NUDGE)
