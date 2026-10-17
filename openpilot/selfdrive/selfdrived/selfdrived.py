@@ -33,6 +33,7 @@ from openpilot.sunnypilot.selfdrive.car.cruise_helpers import CruiseHelper
 from openpilot.sunnypilot.selfdrive.car.intelligent_cruise_button_management.controller import IntelligentCruiseButtonManagement
 from openpilot.sunnypilot.selfdrive.selfdrived.button_state_tracker import ButtonStateTracker
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
+from openpilot.sunnypilot.selfdrive.selfdrived.blind_spot_warning import BlindSpotWarning
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -116,6 +117,11 @@ class SelfdriveD(CruiseHelper):
     # read params
     self.is_metric = self.params.get_bool("IsMetric")
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
+    # Release snapshots carry prebuilt params libraries; fail closed until rebuilt.
+    self.independent_bsm_available = b"IndependentBsmAlert" in self.params.all_keys()
+    self.independent_bsm_alert = self.independent_bsm_available and self.params.get_bool("IndependentBsmAlert")
+    self.blind_spot_warning = BlindSpotWarning()
+    self.car_state_valid = False
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
 
     car_recognized = self.CP.brand != 'mock'
@@ -185,11 +191,21 @@ class SelfdriveD(CruiseHelper):
     CruiseHelper.__init__(self, self.CP)
     self.button_state_tracker = ButtonStateTracker()
 
+  def update_blind_spot_warning(self, CS):
+    if self.blind_spot_warning.update(
+      CS, enabled=self.independent_bsm_alert and self.CP.enableBsm,
+      onroad=self.sm['deviceState'].started,
+      data_valid=self.initialized and self.car_state_valid and CS.canValid and not CS.canTimeout,
+      now=time.monotonic(),
+    ):
+      self.events_sp.add(custom.OnroadEventSP.EventName.blindSpotWarning)
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
     self.events.clear()
     self.events_sp.clear()
+    self.update_blind_spot_warning(CS)
 
     if self.sm['controlsState'].lateralControlState.which() == 'debugState':
       self.events.add(EventName.joystickDebug)
@@ -528,6 +544,7 @@ class SelfdriveD(CruiseHelper):
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
+    self.car_state_valid = _car_state is not None and _car_state.valid
     CS = _car_state.carState if _car_state else self.CS_prev
 
     self.sm.update(0)
@@ -588,7 +605,13 @@ class SelfdriveD(CruiseHelper):
     alerts_sp = self.events_sp.create_alerts(self.state_machine.current_alert_types, callback_args)
 
     self.AM.add_many(self.sm.frame, alerts + alerts_sp)
+    bsm_alert_type = f"blindSpotWarning/{ET.PERMANENT}"
+    if not self.blind_spot_warning.hazard_side:
+      self.AM.alerts.pop(bsm_alert_type, None)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
+    # Drop suppressed BSM notifications rather than playing them after a safety alert.
+    if self.AM.current_alert.alert_type != bsm_alert_type:
+      self.AM.alerts.pop(bsm_alert_type, None)
 
   def publish_selfdriveState(self, CS):
     # selfdriveState
@@ -665,6 +688,7 @@ class SelfdriveD(CruiseHelper):
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
+      self.independent_bsm_alert = self.independent_bsm_available and self.params.get_bool("IndependentBsmAlert")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
